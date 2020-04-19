@@ -1,6 +1,8 @@
 /*
  * If you get an error and can't ping things, do `sudo sysctl -w net.ipv4.ping_group_range="0 65535"`
  * and run the program again.
+ *
+ * Program also must be run as super user.
  */
 
 package main
@@ -51,14 +53,15 @@ func main() {
 
 	// Check if IP is IPv4 or v6.
 	if ip.IP.To4() == nil { // Is v6
-		conn, err = icmp.ListenPacket("udp6", "fe80::1%en0")
+		conn, err = icmp.ListenPacket("ip6:ipv6-icmp", "fe80::1%en0")
+		ip.Zone = "en0"
 
 		if err != nil {
 			fmt.Println("ListenPacket IPv6 error: ", err.Error())
 		}
 
 		msg = icmp.Message{
-			Type: ipv6.ICMPTypeExtendedEchoRequest,
+			Type: ipv6.ICMPTypeEchoRequest,
 			Code: 0, // Code for echo reply.
 			Body: &icmp.Echo{
 				ID:   os.Getpid() & 0xffff,
@@ -98,7 +101,7 @@ func main() {
 	receiveChan := make(chan time.Duration)
 
 	// Goroutine to ping website.
-	go func(rChan chan time.Duration, c *icmp.PacketConn, ipaddr *net.IPAddr, m []byte) {
+	go func(rChan chan time.Duration, c *icmp.PacketConn, ipaddr *net.IPAddr, m []byte, t int) {
 		for {
 			startTime := time.Now() // Get current time.
 
@@ -115,10 +118,15 @@ func main() {
 				fmt.Println("There was an error receiving the packet...")
 			}
 
-			rChan <- time.Since(startTime) // Send the duration.
-			time.Sleep(1 * time.Second)    // Wait for 1 second.
+			// Only write back if message was successful.
+			if err == nil {
+				rChan <- time.Since(startTime) // Send the duration.
+			} else {
+				sent++
+			}
+			time.Sleep(1 * time.Second) // Wait for 1 second.
 		}
-	}(receiveChan, conn, ip, message)
+	}(receiveChan, conn, ip, message, sent)
 
 	// Infinite loop
 	for {
@@ -134,17 +142,19 @@ func main() {
 			fmt.Print(colors.FG_CYAN, "\nPackets sent:\t\t", sent, "\n", colors.RESET)
 			fmt.Print(colors.FG_MAGENTA, "Packets received:\t", success, "\n", colors.RESET)
 
-			// Calculate and print packet loss.
-			rate := 100.0 * float32(sent-success) / float32(sent)
-			if rate >= -1.0 && rate <= 33.3 { // Best.
-				fmt.Print(colors.FG_GREEN, "Packet loss:\t\t", rate, "%\n", colors.RESET)
-			} else if rate > 33.3 && rate <= 66.7 { // OK.
-				fmt.Print(colors.FG_YELLOW, "Packet loss: ", rate, "%\n", colors.RESET)
-			} else { // Worst.
-				fmt.Print(colors.FG_RED, "Packet loss: ", rate, "%\n", colors.RESET)
+			// Calculate and print packet loss if a packet was sent.
+			if sent != 0 {
+				rate := 100.0 * float32(sent-success) / float32(sent)
+				if rate >= -1.0 && rate <= 33.3 { // Best.
+					fmt.Print(colors.FG_GREEN, "Packet loss:\t\t", rate, "%\n", colors.RESET)
+				} else if rate > 33.3 && rate <= 66.7 { // OK.
+					fmt.Print(colors.FG_YELLOW, "Packet loss: ", rate, "%\n", colors.RESET)
+				} else { // Worst.
+					fmt.Print(colors.FG_RED, "Packet loss: ", rate, "%\n", colors.RESET)
+				}
+				// Print the averate RTT.
+				fmt.Print("Average RTT:\t\t", time.Duration(int64(totalDuration)/int64(sent)), "\n")
 			}
-			// Print the averate RTT.
-			fmt.Print("Average RTT:\t\t", time.Duration(int64(totalDuration)/int64(sent)), "\n")
 			os.Exit(0)
 
 		case input := <-receiveChan: // Ping is completed and duration is returned.
