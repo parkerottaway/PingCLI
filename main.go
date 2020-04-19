@@ -122,7 +122,7 @@ func main() {
 			if err == nil {
 				rChan <- time.Since(startTime) // Send the duration.
 			} else {
-				sent++
+				t++
 			}
 			time.Sleep(1 * time.Second) // Wait for 1 second.
 		}
@@ -158,7 +158,6 @@ func main() {
 			os.Exit(0)
 
 		case input := <-receiveChan: // Ping is completed and duration is returned.
-			// TODO Logic for measuring packet loss and average RTT.
 			fmt.Println("RTT: ", input)
 			sent++    // Increase total.
 			success++ // Increase successful pings.
